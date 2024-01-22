@@ -38,8 +38,8 @@ def train_SOM(top, X, Y, lr, sg, epochs, data, pca=False, seed=None, verbose=Fal
     with open(f'{address}/SOM_{namef}.p', 'wb') as outfile:
         pickle.dump(som, outfile)
     # Evaluate the SOM
-    somError = som.quantization_error(data[250000:275000])
-    top_error = som.topographic_error(data[250000:275000])
+    somError = som.quantization_error(data[250000:280000])
+    top_error = som.topographic_error(data[250000:280000])
     # Save the info
     with open(f'{address}/quality.txt','a') as f:
         f.write(f'{top[:3]} {X} {Y} {str(lr)} {str(sg)} {epochs} {int(pca)} {seed} ')
@@ -111,33 +111,62 @@ if __name__ == "__main__":
         50
         ]
     lrs = [
-        0.2,
-        0.4,
+        0.5,
         0.6,
+        0.7,
         0.8,
+        0.9,
         1,
+        1.1,
         1.2,
+        1.3,
         1.4,
-        1.6
+        1.5,
+        1.6,
+        1.7,
+        1.8,
+        1.9
         ]
     sgs = [
-        0.5,
-        1.,
-        1.5,
+        1.8,
+        1.9,
         2.,
+        2.1,
+        2.2,
+        2.3,
+        2.4,
         2.5,
-        3
+        2.6,
+        2.7,
+        2.8
         ]
     n_epochs = [
+        4500,
         5000,
+        5500,
         6000,
+        6500,
         7000,
+        7500,
         8000,
-        10000
+        8500,
+        9000,
+        9500,
+        10000,
+        10500,
+        11000,
+        11500,
+        12000
         ]
     seed = 10
-    topologies = ['hexagonal', 'rectangular']
-    pcas = [True, False]
+    topologies = [
+        'hexagonal',
+        'rectangular'
+        ]
+    pcas = [
+        True,
+        False
+        ]
     np.random.seed(seed)
     inSilicoData = np.random.randint(0, 128, size=(1000000, 7), dtype=int)/127
     n_cores = 8
