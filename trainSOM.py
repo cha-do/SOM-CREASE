@@ -12,7 +12,7 @@ import multiprocessing as mp
 from functools import partial
 
 #%% Define the train_SOM function
-def train_SOM(top, X, Y, lr, sg, epochs, data, pca=False, seed=None, verbose=False, address="./"):
+def train_SOM(top, X, Y, lr, sg, epochs, data, pca=False, seed=None, verbose=False, address="./", saveSOM=False):
     # Create and initialize the SOM
     som = MiniSom(X, Y, 7, sigma=sg, learning_rate=lr, topology=top, random_seed=seed)
     #Train the SOM using batches
@@ -35,11 +35,12 @@ def train_SOM(top, X, Y, lr, sg, epochs, data, pca=False, seed=None, verbose=Fal
     #som.train_batch(data_array, num_epochs, verbose=True)
     #Save the trained SOM
     namef = f'{top[:3]}_{X}x{Y}_lr{lr}_sg{sg}_eps{int(epochs/100)}E2_pca{int(pca)}_s{seed}'
-    with open(f'{address}/SOM_{namef}.p', 'wb') as outfile:
-        pickle.dump(som, outfile)
+    if saveSOM:
+        with open(f'{address}/SOM_{namef}.p', 'wb') as outfile:
+            pickle.dump(som, outfile)
     # Evaluate the SOM
-    somError = som.quantization_error(data[250000:280000])
-    top_error = som.topographic_error(data[250000:280000])
+    somError = som.quantization_error(data[750000:780000])
+    top_error = som.topographic_error(data[750000:780000])
     # Save the info
     with open(f'{address}/quality.txt','a') as f:
         f.write(f'{top[:3]} {X} {Y} {str(lr)} {str(sg)} {epochs} {int(pca)} {seed} ')
@@ -86,16 +87,15 @@ def train_SOM(top, X, Y, lr, sg, epochs, data, pca=False, seed=None, verbose=Fal
 # %% 
 
 #Trian multiple SOM's using mp
-def train_SOMmp(i, works, address):
-    print(f"Work {i}/{k+1}:")
+def train_SOMmp(i, works, seed, data, address):
     top = works[i]["top"]
     x = works[i]["X"]
     pca = works[i]["pca"]
     lr = works[i]["lr"]
     sg = works[i]["sg"]
     epochs = works[i]["epochs"]
-    print(f'{top[:3]}_{x}x{x}_lr{lr}_sg{sg}_eps{int(epochs/100)}E2_pca{int(pca)}_s{seed}')
-    train_SOM(top, x, x, lr, sg, epochs, inSilicoData, pca, seed, False, address)
+    print(f'Work {i}: {top[:3]}_{x}x{x}_lr{lr}_sg{sg}_eps{int(epochs/100)}E2_pca{int(pca)}_s{seed}')
+    train_SOM(top, x, x, lr, sg, epochs, data, pca, seed, False, address)
     
 # %%
 #
@@ -106,8 +106,8 @@ if __name__ == "__main__":
         f.write("Topo X Y LearnRate Sigma Epochs PCA Seed quant_err topo_error\n")
     # Set the SOM parameters
     XY = [
-        30,
-        40,
+        # 30,
+        # 40,
         50
         ]
     lrs = [
@@ -160,16 +160,16 @@ if __name__ == "__main__":
         ]
     seed = 10
     topologies = [
-        'hexagonal',
+        # 'hexagonal',
         'rectangular'
         ]
     pcas = [
-        True,
+        # True,
         False
         ]
     np.random.seed(seed)
     inSilicoData = np.random.randint(0, 128, size=(1000000, 7), dtype=int)/127
-    n_cores = 8
+    n_cores = 6
     # %% set works
     works = {}
     k = 0
@@ -192,6 +192,8 @@ if __name__ == "__main__":
     pool = mp.Pool(n_cores)
     partial_work = partial(train_SOMmp,
                         works = works,
+                        seed = seed,
+                        data = inSilicoData,
                         address = address)
     pool.map(partial_work,[i for i in w])
     pool.close()
