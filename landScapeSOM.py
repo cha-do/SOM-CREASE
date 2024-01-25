@@ -160,6 +160,23 @@ def use_SOM(works, k, paramsInterest=None, log = True):
                             plt.pcolor(logparam, cmap=cm.Blues)  # Plot the distance_map
                         else:
                             plt.pcolor(paramvalue[paramvalue!=-1], cmap=cm.Blues)  # Plot the distance_map
+                        bestperseed = pd.read_csv(f"./Datasets/bestperseed_{profile}__AGA.csv")
+                        normalbestperseed = pd.DataFrame()
+                        colors = ['red', 'green', 'blue', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan',
+                            'magenta', 'lime', 'teal', 'indigo', 'salmon', 'darkgreen', 'skyblue', 'gold', 'orchid',
+                            'sienna', 'lightpink', 'darkgray', 'darkcyan', 'navajowhite', 'rosybrown', 'palevioletred',
+                            'mediumseagreen', 'mediumslateblue', 'cadetblue', 'darkgoldenrod', 'thistle', 'dodgerblue', 'khaki',
+                            'yellow', 'turquoise']
+                        for i in range(7):
+                            column = paramsname[i+1]
+                            normalbestperseed[column] = (bestperseed[column] - dataunique[column].min()) / (dataunique[column].max() - dataunique[column].min())
+                        best_array = normalbestperseed.values
+                        for i in range(len(best_array)):
+                            wx, wy = som.winner(best_array[i])
+                            plt.plot(wx+np.random.random(), wy+np.random.random(), ".", markerfacecolor='None',
+                            markeredgecolor=colors[i%len(colors)], 
+                            markersize=2, 
+                            markeredgewidth=0)
                         plt.colorbar()
                     plt.suptitle(f"{paramInterest}_{metric}_{nameSOM}")
                     plt.savefig(f"./{profile}/{nameSOM}.png",dpi=169,bbox_inches='tight')
@@ -177,7 +194,10 @@ if __name__ == "__main__":
     ]
     
     SOMs = [
-        ["rec", 50, 0.3, 2.9, 90000, 1,	10],
+        ["rec", 50, 0.3, 2.9, 10000, 0, 10],
+        ["rec", 50, 0.1, 4.0, 150000, 0, 10],
+        ["rec", 50, 0.1, 3.6, 150000, 0, 10],
+        ["rec", 50, 0.1, 3.9, 150000, 0, 10]
         ]
     #paramsname = ["R_core", "t_Ain", "t_B", "t_Aout", "sAin", "sigmaR", "-log(bg)", "SSE"]
     paramsInterest = ["SSE"]
