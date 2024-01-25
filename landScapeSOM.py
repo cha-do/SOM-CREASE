@@ -5,112 +5,201 @@ import pandas as pd
 import pickle
 import sys
 import matplotlib.pyplot as plt
+from matplotlib.patches import RegularPolygon, Ellipse
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib import cm, colorbar
+from os import path
+import multiprocessing as mp
+from functools import partial
 
-# %% load data
-# Specify the path to your CSV file
-csv_files_path = [
-    "1_10_12_6_12__AGA.csv",
-    "2_10_6_12_6__AGA.csv",
-    "3_15_12_6_12__AGA.csv",
-    "4_15_6_12_6__AGA.csv",
-    ]
-k = 1
-# Read the CSV file into a DataFrame
-alldata = pd.read_csv(csv_files_path[k])
-# Display the DataFrame
-print(alldata)
-# %% drop duplicates
-paramsname = ["seed","R_core", "t_Ain", "t_B", "t_Aout", "sAin", "sigmaR", "-log(bg)", "SSE"]
-dataunique = alldata[paramsname[1:8]].drop_duplicates()
+def use_SOM(works, k, paramsInterest=None, log = True):
+    profile = works[k]["profile"]
+    SOMparameters = works[k]["SOMparameters"]
+    # Read the CSV file into a DataFrame
+    alldata = pd.read_csv(f"./Datasets/{profile}__AGA.csv")
+    # Display the DataFrame
+    # print(alldata)
+    # %% drop duplicates
+    paramsname = ["seed","R_core", "t_Ain", "t_B", "t_Aout", "sAin", "sigmaR", "-log(bg)", "SSE"]
+    dataunique = alldata[paramsname[1:8]].drop_duplicates()
+    # print(dataunique)
+    #%% Normalize data
+    # Normalize each column to the specified custom range
+    normaldataunique = pd.DataFrame()
+    for i in range(7):
+        column = paramsname[i+1]
+        normaldataunique[column] = (dataunique[column] - dataunique[column].min()) / (dataunique[column].max() - dataunique[column].min())
+    # Display the normalized DataFrame
+    # print(normaldataunique)
+    # %%
+    top = SOMparameters[0]
+    X = SOMparameters[1]
+    Y = X
+    lr = SOMparameters[2]
+    sg = SOMparameters[3]
+    epochs = SOMparameters[4]
+    pca = SOMparameters[5]
+    seed = SOMparameters[6]
+    nameSOM = f'{top[:3]}_{X}x{Y}_lr{lr}_sg{sg}_eps{int(epochs/100)}E2_pca{pca}_s{seed}'
+    # %% Load neurons
+    if path.isfile(f"{profile}/neurons_{nameSOM}.csv"):
+        alldata = pd.read_csv(f"{profile}/neurons_{nameSOM}.csv")
+    else:
+         # %% get the trained SOM
+        SOMaddress = "./trainedSOMs"
+        if path.is_file(f'{SOMaddress}/SOM_{nameSOM}.p'):
+            #load the SOM
+            with open(f'{SOMaddress}/SOM_{nameSOM}.p', 'rb') as infile:
+                som = pickle.load(infile)
+        else:
+            # Create and initialize the SOM
+            som = MiniSom(X, Y, 7, sigma=sg, learning_rate=lr, topology=top, random_seed=seed)
+            if seed is not None:
+                np.random.seed(seed)
+            data = np.random.randint(0, 128, size=(10000000, 7), dtype=int)/127
+            if pca:
+                som.pca_weights_init(data)
+            else:
+                som.random_weights_init(data)
+            som.train_random(data, epochs)
+            #Save the trained SOM
+            with open(f'{SOMaddress}/SOM_{nameSOM}.p', 'wb') as outfile:
+                pickle.dump(som, outfile)
+            # Evaluate the SOM
+            somError = som.quantization_error(data[750000:780000])
+            top_error = som.topographic_error(data[750000:780000])
+            # Save the info
+            with open(f'{SOMaddress}/quality.txt','a') as f:
+                f.write(f'{top[:3]} {X} {Y} {str(lr)} {str(sg)} {epochs} {int(pca)} {seed} ')
+                f.write('%.4lf %.4lf\n'%(somError, top_error))
+        # Get the winning neurons for each data point
+        indexUnique = normaldataunique.index.tolist()
+        data_array = normaldataunique.values
+        neurons = np.ones((alldata.shape[0],2))*-1
+        for i in range(len(indexUnique)):
+            winning_neuron = som.winner(data_array[i])
+            # Create a boolean mask for rows that are exactly equal to the chosen row
+            row_to_match = dataunique.loc[indexUnique[i]]
+            mask = (alldata['R_core'] == row_to_match['R_core']) & \
+            (alldata['t_Ain'] == row_to_match['t_Ain']) & \
+            (alldata['t_B'] == row_to_match['t_B']) & \
+            (alldata['t_Aout'] == row_to_match['t_Aout']) & \
+            (alldata['sAin'] == row_to_match['sAin']) & \
+            (alldata['sigmaR'] == row_to_match['sigmaR']) & \
+            (alldata['-log(bg)'] == row_to_match['-log(bg)'])
+            indices = alldata[mask].index.tolist()
+            neurons[indices] = np.array(winning_neuron)
+        alldata['Neuron_X'] = neurons[:,0]
+        alldata['Neuron_Y'] = neurons[:,1]
+        # print(alldata)
+        alldata.to_csv(f"./{profile}/neurons_{nameSOM}.csv", index=False)
+    #%%
+    if paramsInterest is not None:
+        for paramInterest in paramsInterest:
+            if paramInterest in paramsname:
+                metrics = ["avg", "min", "max"]
+                for metric in metrics:
+                    paramvalue = np.ones((X,Y))*-1
+                    for i in range(X):
+                        for j in range(Y):
+                            indexes = alldata[(alldata['Neuron_X']==i) & (alldata['Neuron_Y']==j)].index.tolist()
+                            if indexes != []:
+                                if metric == "avg":
+                                    paramvalue[i,j] = alldata.loc[indexes][paramInterest].mean()
+                                elif metric == "min":
+                                    paramvalue[i,j] = alldata.loc[indexes][paramInterest].min()
+                                else: #metric == "max"
+                                    paramvalue[i,j] = alldata.loc[indexes][paramInterest].max()
+                    #normSSE = (sseavg-sseavg[sseavg!=-1].min())/(sseavg.max()-sseavg[sseavg!=-1].min())
+                    # logSSEavg = np.log(sseavg)
+                    if log:
+                        logparam = np.log(paramvalue[paramvalue!=-1])
+                    # %%
+                    # Visualice the SSEmap
+                    f = plt.figure(figsize=(10 ,10))
+                    ax = f.add_subplot(111)
+                    if top == "hex":
+                        xx, yy = som.get_euclidean_coordinates()
+                        ax.set_aspect('equal')
+                        # iteratively add hexagons
+                        plt.plot(0, 0)
+                        plt.plot(X-1, (Y-1)*np.sqrt(3)/2)
+                        if log:
+                            minval = logparam.min()
+                            deltaval = logparam.max()-minval
+                        else:
+                            minval = paramvalue[paramvalue!=-1].min()
+                            deltaval = paramvalue.max()-minval
+                        for i in range(X):
+                            for j in range(Y):
+                                if paramvalue[i, j] != -1:
+                                    color = cm.Blues((np.log(paramvalue[i, j])-minval)/deltaval)
+                                else:
+                                    color = "k"
+                                wy = yy[(i, j)] * np.sqrt(3) / 2
+                                hex = RegularPolygon((xx[(i, j)], wy), 
+                                                    numVertices=6, 
+                                                    radius=1 / np.sqrt(3),
+                                                    facecolor=color)
+                                ax.add_patch(hex)
+                        # plt.ylim(-1,Y)
+                        # plt.xlim(-1,X)
+                        xrange = np.arange(X)
+                        yrange = np.arange(Y)
+                        plt.xticks(xrange-.5, xrange)
+                        plt.yticks(yrange * np.sqrt(3) / 2, yrange)
 
-print(dataunique)
-#%% Normalize data
-# Define custom minimum and maximum values for each column
-minvalu = np.array([50, 30, 30, 30, 0.1, 0.0, 2.5])
-maxvalu = np.array([250, 200, 200, 200, 0.45, 0.45, 5.5])
-
-# Normalize each column to the specified custom range
-normaldataunique = pd.DataFrame()
-
-for i in range(len(minvalu)):
-    min_val = minvalu[i]
-    max_val = maxvalu[i]
-    column = paramsname[i+1]
-    normaldataunique[column] = (dataunique[column] - min_val) / (max_val - min_val)
-
-# Display the normalized DataFrame
-print(normaldataunique)
-#%%
-# Tamaño de la cuadrícula hexagonal
-tamanio_mapa = (20, 20)  # Ajusta según tus necesidades
-
-# Crear e inicializar el SOM
-som = MiniSom(tamanio_mapa[0], tamanio_mapa[1], 7, sigma=0.2, learning_rate=0.3)
-data_array = normaldataunique.values
-som.random_weights_init(data_array)
-# Entrenar el SOM
-num_epochs = 10000
-# batch_size = 10000
-# for j in range(num_epochs):
-#     np.random.shuffle(data_array)
-#     sys.stdout.write("\r        Epoch {:d}/{:d}".format(j+1,num_epochs))
-#     sys.stdout.flush()
-#     for i in range(0, len(data_array), batch_size):
-#         sys.stdout.write("\r{:d}".format(i+1))
-#         sys.stdout.flush()
-#         batch = data_array[i:i + batch_size]
-#         som.train_random(batch, 1)
-som.train_batch(data_array, num_epochs, verbose=True)
-#Save the trained SOM
-with open(f'som{tamanio_mapa[0]}x{tamanio_mapa[1]}.p', 'wb') as outfile:
-    pickle.dump(som, outfile)
-# %% load a trained SOM
-with open('som.p', 'rb') as infile:
-    som_trained = pickle.load(infile)
-#%%
-# Get the winning neurons for each data point
-# winning_neurons = som.winner(data_array)
-indexUnique = normaldataunique.index.tolist()
-data_array = normaldataunique.values
-neurons = np.ones((alldata.shape[0],2))*-1
-for i in range(len(indexUnique)):
-    winning_neuron = som.winner(data_array[i])
-    # Create a boolean mask for rows that are exactly equal to the chosen row
-    row_to_match = dataunique.loc[indexUnique[i]]
-    mask = (alldata['R_core'] == row_to_match['R_core']) & \
-    (alldata['t_Ain'] == row_to_match['t_Ain']) & \
-    (alldata['t_B'] == row_to_match['t_B']) & \
-    (alldata['t_Aout'] == row_to_match['t_Aout']) & \
-    (alldata['sAin'] == row_to_match['sAin']) & \
-    (alldata['sigmaR'] == row_to_match['sigmaR']) & \
-    (alldata['-log(bg)'] == row_to_match['-log(bg)'])
-    indices = alldata[mask].index.tolist()
-    neurons[indices] = np.array(winning_neuron)
-alldata['Neuron_X'] = neurons[:,0]
-alldata['Neuron_Y'] = neurons[:,1]
-print(alldata)
-
-alldata.to_csv("neurons_"+csv_files_path[k], index=False)
-# %% Load neurons
-alldata = pd.read_csv("neurons_"+csv_files_path[k])
-#%%
-sseavg = np.ones(tamanio_mapa)
-ssemin = np.ones(tamanio_mapa)
-ssemax = np.ones(tamanio_mapa)
-for i in range(tamanio_mapa[0]):
-    for j in range(tamanio_mapa[1]):
-        indexes = alldata[(alldata['Neuron_X']==i) & (alldata['Neuron_Y']==j)].index.tolist()
-        if indexes != []:
-            sseavg[i,j] = alldata.loc[indexes]["SSE"].mean()
-            ssemin[i,j] = alldata.loc[indexes]["SSE"].min()
-            ssemax[i,j] = alldata.loc[indexes]["SSE"].max()
-
-#%%
-# Visualizar el mapa de distancias de las neuronas
-sseavglog = np.log(sseavg)
-plt.figure(figsize=(10, 10))
-plt.pcolor(sseavg, cmap='bone_r')  # Plot del mapa de distancias
-plt.colorbar()
-plt.show()
-
+                        divider = make_axes_locatable(plt.gca())
+                        ax_cb = divider.new_horizontal(size="5%", pad=0.05)    
+                        cb1 = colorbar.ColorbarBase(ax_cb, cmap=cm.Blues, 
+                                                    orientation='vertical', alpha=.4)
+                        cb1.ax.get_yaxis().labelpad = 100
+                        plt.gcf().add_axes(ax_cb)
+                    else:#top == "rec"
+                        if log:
+                            plt.pcolor(logparam, cmap=cm.Blues)  # Plot the distance_map
+                        else:
+                            plt.pcolor(paramvalue[paramvalue!=-1], cmap=cm.Blues)  # Plot the distance_map
+                        plt.colorbar()
+                    plt.suptitle(f"{paramInterest}_{metric}_{nameSOM}")
+                    plt.savefig(f"./{profile}/{nameSOM}.png",dpi=169,bbox_inches='tight')
+            else:
+                print(f"{paramInterest} is no a valid parameter. The valid parameters are the next ones: {paramsname}")
 # %%
+if __name__ == "__main__":
+    #%% Prepare works
+                    
+    profiles = [
+        "1_10_12_6_12",
+        "2_10_6_12_6",
+        "3_15_12_6_12",
+        "4_15_6_12_6"
+    ]
+    
+    SOMs = [
+        ["rec", 50, 0.3, 2.9, 90000, 1,	10],
+        ]
+    #paramsname = ["R_core", "t_Ain", "t_B", "t_Aout", "sAin", "sigmaR", "-log(bg)", "SSE"]
+    paramsInterest = ["SSE"]
+    log = True
+    n_cores = 6
+    # %% set works
+    works = {}
+    w = 0
+    for profile in profiles:
+        for SOMparameters in SOMs:
+            works[w] = {"profile":profile,
+                        "SOMparameters":SOMparameters}
+            w+=1
+    print("Total Works:", w)
+    firstwork = 0
+    ws = range(firstwork,w)#[0,1,2,3,4,5]
+    pool = mp.Pool(n_cores)
+    partial_work = partial(use_SOM,
+                        works = works,
+                        paramsInterest = paramsInterest,
+                        log = log
+                        )
+    pool.map(partial_work,[k for k in ws])
+    pool.close()
+    pool.join
